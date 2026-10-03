@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Compare</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #e2e2dc; --accent: #c4562f; --code-bg: #f1f0ec; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171716; --panel: #212120; --text: #ececea; --muted: #9a9a94;
+      --border: #34342f; --accent: #e07a50; --code-bg: #2a2a27; --error: #f2b8b5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  form { display: grid; gap: 10px; margin-bottom: 20px; }
+  textarea { width: 100%; min-height: 110px; resize: vertical; padding: 12px; font: inherit;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+  button.secondary { background: transparent; color: var(--text); border-color: var(--border); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column; min-height: 240px; overflow: hidden; }
+  .panel header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: grid; gap: 6px; }
+  .panel input { width: 100%; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+  .stats { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 18px; }
+  .out { padding: 12px 14px; overflow-wrap: anywhere; flex: 1; }
+  .out:empty::before { content: "Response will appear here"; color: var(--muted); }
+  .out pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+  .out code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .out :not(pre) > code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+  .out p:first-child { margin-top: 0; }
+  .error { color: var(--error); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Model Compare</h1>
+  <p class="sub">Send one prompt to three models through OpenRouter and compare the answers side by side.</p>
+
+  <form id="form">
+    <textarea id="prompt" placeholder="Ask something…" required></textarea>
+    <div class="row">
+      <button id="send" type="submit">Send to all</button>
+      <button id="stop" type="button" class="secondary" disabled>Stop</button>
+      <span class="hint">⌘/Ctrl + Enter to send</span>
+    </div>
+  </form>
+
+  <div class="grid" id="grid"></div>
+  <datalist id="models"></datalist>
+</main>
+
+<script>
+const DEFAULT_MODELS = ["anthropic/claude-sonnet-5.5", "moonshotai/kimi-k3", "deepseek/deepseek-v4-pro"];
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+const grid = document.getElementById("grid");
+const panels = DEFAULT_MODELS.map((def, i) => {
+  const el = document.createElement("section");
+  el.className = "panel";
+  el.innerHTML = `<header>
+      <input list="models" spellcheck="false" aria-label="Model ${i + 1}">
+      <div class="stats"></div>
+    </header>
+    <div class="out"></div>`;
+  grid.appendChild(el);
+  const input = el.querySelector("input");
+  input.value = store.get(`model${i}`) || def;
+  input.addEventListener("change", () => store.set(`model${i}`, input.value.trim()));
+  return { input, stats: el.querySelector(".stats"), out: el.querySelector(".out") };
+});
+
+// Populate model autocomplete from OpenRouter's public catalog.
+fetch("https://openrouter.ai/api/v1/models")
+  .then(r => r.json())
+  .then(({ data }) => {
+    const list = document.getElementById("models");
+    for (const m of data.sort((a, b) => a.id.localeCompare(b.id))) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.label = m.name;
+      list.appendChild(opt);
+    }
+  })
+  .catch(() => {});
+
+const form = document.getElementById("form");
+const promptEl = document.getElementById("prompt");
+const sendBtn = document.getElementById("send");
+const stopBtn = document.getElementById("stop");
+let controller = null;
+
+promptEl.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) form.requestSubmit();
+});
+stopBtn.addEventListener("click", () => controller?.abort());
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+  controller = new AbortController();
+  sendBtn.disabled = true;
+  stopBtn.disabled = false;
+  await Promise.all(panels.map(p => run(p, prompt, controller.signal)));
+  sendBtn.disabled = false;
+  stopBtn.disabled = true;
+});
+
+async function run(panel, prompt, signal) {
+  const model = panel.input.value.trim();
+  panel.out.innerHTML = "";
+  panel.stats.textContent = "Waiting…";
+  const start = performance.now();
+  let firstTokenAt = null, text = "", usage = null;
+
+  const render = () => { panel.out.innerHTML = DOMPurify.sanitize(marked.parse(text)); };
+  const showStats = (done) => {
+    const now = performance.now();
+    const parts = [];
+    if (firstTokenAt) parts.push(`first token ${((firstTokenAt - start) / 1000).toFixed(2)}s`);
+    parts.push(`${done ? "total" : "elapsed"} ${((now - start) / 1000).toFixed(1)}s`);
+    if (usage?.completion_tokens) parts.push(`${usage.completion_tokens} tokens out`);
+    if (usage?.cost != null) parts.push(`$${usage.cost.toFixed(5)}`);
+    panel.stats.textContent = parts.join(" · ");
+  };
+
+  try {
+    const res = await post(model, prompt, signal);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+        let chunk;
+        try { chunk = JSON.parse(data); } catch { continue; }
+        if (chunk.error) throw new Error(chunk.error.message || "Stream error");
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) {
+          firstTokenAt ??= performance.now();
+          text += delta;
+          render();
+        }
+        if (chunk.usage) usage = chunk.usage;
+      }
+      showStats(false);
+    }
+    showStats(true);
+  } catch (err) {
+    showStats(true);
+    const msg = err.name === "AbortError" ? "Stopped." : `Error: ${err.message}`;
+    panel.out.insertAdjacentHTML("beforeend", `<p class="error"></p>`);
+    panel.out.lastElementChild.textContent = msg;
+  }
+}
+
+// Sends the request; if the server requires an access password, asks once and retries.
+async function post(model, prompt, signal, retried = false) {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-app-password": store.get("appPassword") || "" },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+    signal,
+  });
+  if (res.status === 401 && !retried) {
+    const pw = await askPassword();
+    if (pw) return post(model, prompt, signal, true);
+  }
+  return res;
+}
+
+let pendingPassword = null;
+function askPassword() {
+  pendingPassword ??= Promise.resolve(window.prompt("Access password:")).then(pw => {
+    if (pw) store.set("appPassword", pw);
+    setTimeout(() => { pendingPassword = null; }, 0);
+    return pw;
+  });
+  return pendingPassword;
+}
+</script>
+</body>
+</html>

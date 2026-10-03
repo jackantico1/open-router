@@ -1,0 +1,6 @@
+{
+  "name": "open-router-compare",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" }
+}
