@@ -17,10 +17,10 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    font: 22.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  h1 { font-size: 30px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 21px; }
   form { display: grid; gap: 10px; margin-bottom: 20px; }
   textarea { width: 100%; min-height: 110px; resize: vertical; padding: 12px; font: inherit;
     border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); }
@@ -30,22 +30,30 @@
     border: 1px solid var(--accent); background: var(--accent); color: #fff; }
   button.secondary { background: transparent; color: var(--text); border-color: var(--border); font-weight: 500; }
   button:disabled { opacity: .5; cursor: default; }
-  .hint { color: var(--muted); font-size: 13px; }
+  .hint { color: var(--muted); font-size: 19.5px; }
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     display: flex; flex-direction: column; min-height: 240px; overflow: hidden; }
   .panel header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: grid; gap: 6px; }
-  .panel input { width: 100%; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px;
+  .panel input { width: 100%; font: 19.5px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px;
     border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
-  .stats { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 18px; }
+  .stats { font-size: 18px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 27px; }
   .out { padding: 12px 14px; overflow-wrap: anywhere; flex: 1; }
   .out:empty::before { content: "Response will appear here"; color: var(--muted); }
   .out pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
-  .out code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .out code { font: 19.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .out :not(pre) > code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
   .out p:first-child { margin-top: 0; }
   .error { color: var(--error); white-space: pre-wrap; }
+  .settings { display: grid; gap: 12px; padding: 12px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px; }
+  .settings h2 { font-size: 21px; font-weight: 600; margin: 0; }
+  .settings label { display: grid; gap: 4px; font-size: 19.5px; color: var(--muted); }
+  .settings textarea { min-height: 70px; background: var(--bg); }
+  .settings input, .settings select { font: inherit; padding: 7px 9px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--text); width: 210px; }
+  .settings select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 </style>
 </head>
 <body>
@@ -55,6 +63,34 @@
 
   <form id="form">
     <textarea id="prompt" placeholder="Ask something…" required></textarea>
+    <section class="settings">
+      <h2>Settings</h2>
+      <label>System prompt
+        <textarea id="system" placeholder="Optional. Applied to all three models."></textarea>
+      </label>
+      <div class="row">
+        <label>Temperature
+          <select id="temperature">
+            <option value="0.2">Precise (0.2)</option>
+            <option value="0.7" selected>Balanced (0.7)</option>
+            <option value="1.2">Creative (1.2)</option>
+          </select>
+        </label>
+        <label>Reasoning effort
+          <select id="reasoning">
+            <option value="">Model default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+      </div>
+      <span class="hint">Temperature controls how predictable the wording is. Precise sticks to the most likely
+        words, so answers are focused and consistent: good for facts, code, and data. Balanced suits everyday
+        questions and writing. Creative takes more chances, which helps brainstorming and fiction but can drift
+        off-topic. It doesn't make a model smarter or more accurate.</span>
+      <span class="hint">Models that don't support a setting ignore it. Reasoning models often ignore temperature.</span>
+    </section>
     <div class="row">
       <button id="send" type="submit">Send to all</button>
       <button id="stop" type="button" class="secondary" disabled>Stop</button>
@@ -109,6 +145,25 @@ const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 let controller = null;
 
+// Settings persist in localStorage.
+const systemEl = document.getElementById("system");
+const temperatureEl = document.getElementById("temperature");
+const reasoningEl = document.getElementById("reasoning");
+for (const [el, key] of [[systemEl, "system"], [temperatureEl, "temperature"], [reasoningEl, "reasoning"]]) {
+  const fallback = el.value;
+  el.value = store.get(key) || fallback;
+  if (el.selectedIndex === -1) el.value = fallback; // saved value is no longer an option
+  el.addEventListener("input", () => store.set(key, el.value));
+}
+
+function getSettings() {
+  return {
+    system: systemEl.value.trim(),
+    temperature: Number(temperatureEl.value),
+    reasoningEffort: reasoningEl.value || null,
+  };
+}
+
 promptEl.addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) form.requestSubmit();
 });
@@ -118,15 +173,16 @@ form.addEventListener("submit", async e => {
   e.preventDefault();
   const prompt = promptEl.value.trim();
   if (!prompt) return;
+  const settings = getSettings();
   controller = new AbortController();
   sendBtn.disabled = true;
   stopBtn.disabled = false;
-  await Promise.all(panels.map(p => run(p, prompt, controller.signal)));
+  await Promise.all(panels.map(p => run(p, prompt, settings, controller.signal)));
   sendBtn.disabled = false;
   stopBtn.disabled = true;
 });
 
-async function run(panel, prompt, signal) {
+async function run(panel, prompt, settings, signal) {
   const model = panel.input.value.trim();
   panel.out.innerHTML = "";
   panel.stats.textContent = "Waiting…";
@@ -140,12 +196,14 @@ async function run(panel, prompt, signal) {
     if (firstTokenAt) parts.push(`first token ${((firstTokenAt - start) / 1000).toFixed(2)}s`);
     parts.push(`${done ? "total" : "elapsed"} ${((now - start) / 1000).toFixed(1)}s`);
     if (usage?.completion_tokens) parts.push(`${usage.completion_tokens} tokens out`);
+    const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens;
+    if (reasoningTokens) parts.push(`${reasoningTokens} reasoning`);
     if (usage?.cost != null) parts.push(`$${usage.cost.toFixed(5)}`);
     panel.stats.textContent = parts.join(" · ");
   };
 
   try {
-    const res = await post(model, prompt, signal);
+    const res = await post(model, prompt, settings, signal);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${res.status}`);
@@ -185,16 +243,20 @@ async function run(panel, prompt, signal) {
 }
 
 // Sends the request; if the server requires an access password, asks once and retries.
-async function post(model, prompt, signal, retried = false) {
+async function post(model, prompt, settings, signal, retried = false) {
+  const messages = [{ role: "user", content: prompt }];
+  if (settings.system) messages.unshift({ role: "system", content: settings.system });
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-app-password": store.get("appPassword") || "" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({
+      model, messages, temperature: settings.temperature, reasoningEffort: settings.reasoningEffort,
+    }),
     signal,
   });
   if (res.status === 401 && !retried) {
     const pw = await askPassword();
-    if (pw) return post(model, prompt, signal, true);
+    if (pw) return post(model, prompt, settings, signal, true);
   }
   return res;
 }

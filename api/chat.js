@@ -14,9 +14,24 @@ export async function POST(request) {
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const { model, messages } = body;
+  const { model, messages, temperature, reasoningEffort } = body;
   if (typeof model !== "string" || !Array.isArray(messages)) {
     return Response.json({ error: "Expected { model, messages }" }, { status: 400 });
+  }
+
+  // Optional settings; omitted ones fall back to the model's defaults.
+  const options = {};
+  if (temperature != null) {
+    if (typeof temperature !== "number" || temperature < 0 || temperature > 2) {
+      return Response.json({ error: "temperature must be a number from 0 to 2" }, { status: 400 });
+    }
+    options.temperature = temperature;
+  }
+  if (reasoningEffort != null) {
+    if (!["low", "medium", "high"].includes(reasoningEffort)) {
+      return Response.json({ error: "reasoningEffort must be low, medium, or high" }, { status: 400 });
+    }
+    options.reasoning = { effort: reasoningEffort };
   }
 
   const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -27,7 +42,7 @@ export async function POST(request) {
       "HTTP-Referer": new URL(request.url).origin,
       "X-Title": "OpenRouter Model Compare",
     },
-    body: JSON.stringify({ model, messages, stream: true, usage: { include: true } }),
+    body: JSON.stringify({ model, messages, ...options, stream: true, usage: { include: true } }),
     signal: request.signal,
   });
 
